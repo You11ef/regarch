@@ -1,304 +1,228 @@
-//
-// Wrap_cGSLMatrix.cpp
-//
+#include "StdAfxRegArchLib.h"
 #include <boost/python.hpp>
-#include <sstream>    // for std::ostringstream
-#include <string>     // for std::string
+#include <boost/python/wrapper.hpp>
+#include <boost/python/extract.hpp>
 
-// IMPORTANT: Do NOT do "using namespace std;" in this file.
-// If you must include <complex> or <cmath>, do so, but avoid "using namespace std;"
 
-#include "StdAfxVectorAndMatrix.h"  // where 'uint' etc. might be defined
-#include "cGSLVector.h"             // ensure cGSLVector is known/wrapped
-#include "cGSLMatrix.h"
-
-// Create a shorter alias for boost::python to avoid confusion with std::arg
-namespace bp = boost::python;
-
-// We'll explicitly refer to the VectorAndMatrixNameSpace below.
+using namespace boost::python;
 using namespace VectorAndMatrixNameSpace;
 
-//----------------------------------------------------------
-// 1) Helpers for element get/set
-//----------------------------------------------------------
-static double gslmatrix_get(const cGSLMatrix& mat, int i, int j)
+// Helper functions for cGSLMatrix in Python
+static double GSLMatrix_get_item(const cGSLMatrix& self, int row, int col)
 {
-    return mat[i][j];
-}
-static void gslmatrix_set(cGSLMatrix& mat, int i, int j, double value)
-{
-    mat[i][j] = value;
+    // uses operator[](row) then index col
+    return self[row][col];
 }
 
-//----------------------------------------------------------
-// 2) Helper to wrap cGSLMatrix::Print(...) as a string
-//----------------------------------------------------------
-static std::string gslmatrix_print(cGSLMatrix& mat)
+static void GSLMatrix_set_item(cGSLMatrix& self, int row, int col, double val)
+{
+    self[row][col] = val;
+}
+
+static std::string GSLMatrix_str(const cGSLMatrix& self)
 {
     std::ostringstream oss;
-    mat.Print(oss);
+    cGSLMatrix& nonConst = const_cast<cGSLMatrix&>(self);
+    nonConst.Print(oss);
     return oss.str();
 }
 
-//----------------------------------------------------------
-// 3) Wrappers for free functions that operate on cGSLMatrix
-//----------------------------------------------------------
-
-// Svd(...) returns by reference: we wrap it to return (U, S, V) as a Python tuple
-static bp::tuple Svd_wrapper(const cGSLMatrix& M)
+// Assignment operator helpers
+static cGSLMatrix& GSLMatrix_assignDouble(cGSLMatrix& self, double val)
 {
-    cGSLMatrix U, V;
-    cGSLVector S;
-    Svd(M, U, S, V);  // modifies U, S, V by reference
-    return bp::make_tuple(U, S, V);
+    return self = val;
 }
 
-// Inv(...) no error
-static cGSLMatrix Inv_noerr_wrapper(const cGSLMatrix& M)
+static cGSLMatrix& GSLMatrix_assignMatrix(cGSLMatrix& self, const cGSLMatrix& rhs)
 {
-    return Inv(M);
+    return self = rhs;
 }
 
-// Inv(...) with error
-static bp::tuple Inv_err_wrapper(const cGSLMatrix& M)
+static cGSLMatrix& GSLMatrix_assignVector(cGSLMatrix& self, const cGSLVector& vec)
 {
-    int errcode = 0;
-    cGSLMatrix invMat = Inv(M, errcode);
-    return bp::make_tuple(invMat, errcode);
+    return self = vec;
 }
 
-// matrix * vector
-static cGSLVector mat_mul_vec(const cGSLMatrix& M, const cGSLVector& v)
+// Helper functions for matrix row access
+//
+// This helper class allows Python-style indexing: matrix[row][col]
+struct MatrixRowHelper {
+    cGSLMatrix& matrix;
+    int row;
+
+    MatrixRowHelper(cGSLMatrix& mat, int r) : matrix(mat), row(r) {}
+
+    double getitem(int col) {
+        if (col < 0 || col >= static_cast<int>(matrix.GetNCol())) {
+            PyErr_SetString(PyExc_IndexError, "Column index out of range");
+            throw_error_already_set();
+        }
+        return matrix[row][col];
+    }
+
+    void setitem(int col, double value) {
+        if (col < 0 || col >= static_cast<int>(matrix.GetNCol())) {
+            PyErr_SetString(PyExc_IndexError, "Column index out of range");
+            throw_error_already_set();
+        }
+        matrix[row][col] = value;
+    }
+};
+
+static object GSLMatrix_getitem(cGSLMatrix& self, int row)
 {
-    return M * v; // friend operator*(cGSLMatrix, cGSLVector)
+    if (row < 0 || row >= static_cast<int>(self.GetNRow())) {
+        PyErr_SetString(PyExc_IndexError, "Row index out of range");
+        throw_error_already_set();
+    }
+
+    // Create a MatrixRowHelper and expose its methods to Python
+    MatrixRowHelper helper(self, row);
+    return class_<MatrixRowHelper>("MatrixRowHelper", no_init)
+        .def("__getitem__", &MatrixRowHelper::getitem)
+        .def("__setitem__", &MatrixRowHelper::setitem)
+        .def("__repr__", +[](const MatrixRowHelper& h) {
+        std::ostringstream oss;
+        oss << "Row " << h.row << " of matrix";
+        return oss.str();
+            })
+        (helper);
 }
 
-// vector * matrix
-static cGSLMatrix vec_mul_mat(const cGSLVector& v, const cGSLMatrix& M)
-{
-    return v * M; // friend operator*(cGSLVector, cGSLMatrix)
-}
+// Overloads for ReAlloc
+static void (cGSLMatrix::* ReAlloc_rc_val)(uint, uint, double)
+= &cGSLMatrix::ReAlloc;
 
-//----------------------------------------------------------
-// 4) The export function
-//----------------------------------------------------------
+static void (cGSLMatrix::* ReAlloc_cGSLVector)(const cGSLVector&)
+= &cGSLMatrix::ReAlloc;
+
+static void (cGSLMatrix::* ReAlloc_cGSLMatrix)(const cGSLMatrix&)
+= &cGSLMatrix::ReAlloc;
+
+// Export function for cGSLMatrix
 void export_cGSLMatrix()
 {
-    //
-    // Wrap class cGSLMatrix
-    //
-    bp::class_< cGSLMatrix >("cGSLMatrix",
-        // constructor with named args:
-        bp::init< int, int, double >(
-            (bp::arg("theNRow") = 0,
-                bp::arg("theNCol") = 0,
-                bp::arg("theVal") = 0.0),
-            "Construct a cGSLMatrix with (theNRow x theNCol) dimensions, "
-            "all elements optionally set to theVal (default=0.0)."
-        )
-    )
-        // Optionally, wrap copy constructors from cGSLMatrix or cGSLVector:
-        .def(bp::init< const cGSLMatrix& >(
-            bp::args("other"),
-            "Copy-construct from another cGSLMatrix."))
-        .def(bp::init< const cGSLVector& >(
-            bp::args("vector"),
-            "Construct a 1-column matrix from a cGSLVector."))
-
-        // Basic methods
-        .def("GetNRow", &cGSLMatrix::GetNRow, "Return the number of rows.")
-        .def("GetNCol", &cGSLMatrix::GetNCol, "Return the number of columns.")
-        .def("Delete", &cGSLMatrix::Delete, "Clear (delete) the matrix data.")
-
-        // Access an element
-        .def("get_item", &gslmatrix_get,
-            bp::args("i", "j"),
-            "Get element at row i, column j.")
-        .def("set_item", &gslmatrix_set,
-            bp::args("i", "j", "value"),
-            "Set element at row i, column j to 'value'.")
-
-        // ReAlloc overloads
-        .def("ReAlloc",
-            (void (cGSLMatrix::*)(uint, uint, double)) & cGSLMatrix::ReAlloc,
-            (bp::arg("nRow"), bp::arg("nCol"), bp::arg("val") = 0.0),
-            "Reallocate the matrix (nRow x nCol), fill with val.")
-        .def("ReAlloc",
-            (void (cGSLMatrix::*)(const cGSLVector&)) & cGSLMatrix::ReAlloc,
-            bp::arg("vector"),
-            "Reallocate so this matrix becomes a single-column copy of 'vector'.")
-        .def("ReAlloc",
-            (void (cGSLMatrix::*)(const cGSLMatrix&)) & cGSLMatrix::ReAlloc,
-            bp::arg("matrix"),
-            "Reallocate as a copy of another matrix (same shape, data).")
-
-        // Set an element by (row,col)
-        .def("Set",
-            &cGSLMatrix::Set,
-            (bp::arg("value"), bp::arg("row"), bp::arg("col")),
-            "Set matrix[row,col] = value.")
-
-#ifndef _RDLL_
-        // Print -> string
-        .def("Print",
-            &gslmatrix_print,
-            "Return a string representation of the matrix via Print().")
-#else
-        .def("Print",
-            &gslmatrix_print,
-            "Return a string representation of the matrix via Print().")
-#endif
-
-        // Set row/column from a vector
-        .def("SetRow",
-            &cGSLMatrix::SetRow,
-            (bp::arg("rowIndex"), bp::arg("vector")),
-            "Set entire row rowIndex from the given cGSLVector.")
-        .def("SetColumn",
-            &cGSLMatrix::SetColumn,
-            (bp::arg("colIndex"), bp::arg("vector")),
-            "Set entire column colIndex from the given cGSLVector.")
-
-        // operator= variants as named methods
-        .def("assign_matrix",
-            (cGSLMatrix & (cGSLMatrix::*)(const cGSLMatrix&)) & cGSLMatrix::operator=,
-            bp::args("other"),
-            bp::return_internal_reference<>(),
-            "Equivalent to operator= for another cGSLMatrix.")
-        .def("assign_vector",
-            (cGSLMatrix & (cGSLMatrix::*)(const cGSLVector&)) & cGSLMatrix::operator=,
-            bp::args("vector"),
-            bp::return_internal_reference<>(),
-            "Equivalent to operator= for a cGSLVector (makes a 1-col matrix).")
-        .def("assign_scalar",
-            (cGSLMatrix & (cGSLMatrix::*)(double)) & cGSLMatrix::operator=,
-            bp::args("val"),
-            bp::return_internal_reference<>(),
-            "Set *all* elements to the given scalar (like operator=(double)).")
-
-        // In-place operators: +=, -=, *=, /=
-        .def(bp::self += bp::self)
-        .def(bp::self -= bp::self)
-        .def("add_scalar_inplace",
-            (cGSLMatrix & (cGSLMatrix::*)(double)) & cGSLMatrix::operator+=,
-            bp::args("scalar"),
-            bp::return_internal_reference<>(),
-            "Matrix += scalar (in-place).")
-        .def("sub_scalar_inplace",
-            (cGSLMatrix & (cGSLMatrix::*)(double)) & cGSLMatrix::operator-=,
-            bp::args("scalar"),
-            bp::return_internal_reference<>(),
-            "Matrix -= scalar (in-place).")
-        .def("mul_matrix_inplace",
-            (cGSLMatrix & (cGSLMatrix::*)(const cGSLMatrix&)) & cGSLMatrix::operator*=,
-            bp::args("otherMatrix"),
-            bp::return_internal_reference<>(),
-            "Matrix = Matrix * otherMatrix (in-place).")
-        .def("mul_scalar_inplace",
-            (cGSLMatrix & (cGSLMatrix::*)(double)) & cGSLMatrix::operator*=,
-            bp::args("scalar"),
-            bp::return_internal_reference<>(),
-            "Matrix *= scalar (in-place).")
-        .def("div_scalar_inplace",
-            (cGSLMatrix & (cGSLMatrix::*)(double)) & cGSLMatrix::operator/=,
-            bp::args("scalar"),
-            bp::return_internal_reference<>(),
-            "Matrix /= scalar (in-place).")
-
-        // Overloaded operators for matrix + matrix, matrix + double, etc.
-        .def(bp::self + bp::self)
-        .def(bp::self - bp::self)
-        .def(bp::self * bp::self)
-        .def(bp::self + double())
-        .def(bp::self - double())
-        .def(double() + bp::self)
-        .def(double() - bp::self)
-        .def(bp::self * double())
-        .def(bp::self / double())
-        .def(double() * bp::self)
+    // First register the row helper class
+    class_<MatrixRowHelper>("MatrixRowHelper", no_init)
+        .def("__getitem__", &MatrixRowHelper::getitem)
+        .def("__setitem__", &MatrixRowHelper::setitem)
         ;
 
-    //
-    // Wrap free functions (Zeros, Identity, Svd, Inv, etc.)
-    //
-    bp::def("Zeros",
-        &Zeros,
-        "Zeros(n, p) -> Return an n-by-p cGSLMatrix of all 0.0");
+    // Now register the main matrix class
+    class_<cGSLMatrix>("cGSLMatrix",
+        "Wrapper for cGSLMatrix (GSL-based matrix).",
+        init< optional<int, int, double> >(
+            (boost::python::arg("theNRow") = 0, boost::python::arg("theNCol") = 0, boost::python::arg("theVal") = 0.0),
+            "Constructor cGSLMatrix(int nRow=0, int nCol=0, double val=0.0)."
+        )
+    )
+        .def(init<const cGSLVector&>((boost::python::arg("theVect")),
+            "Constructor cGSLMatrix(const cGSLVector& theVect)."))
 
-    bp::def("Identity",
-        &Identity,
-        "Identity(n) -> Return the n-by-n identity matrix.");
+        .def(init<const cGSLMatrix&>((boost::python::arg("theMat")),
+            "Constructor cGSLMatrix(const cGSLMatrix& theMat)."))
 
-    // NOTE: we comment out Diag(...) and MatrixForMultNormal(...)
-    // because the user's library or signature doesn't match and
-    // it causes link errors. If you have a matching definition
-    // in your library, uncomment these lines.
-    //
-    //    bp::def("Diag",
-    //        &Diag,
-    //        "Diag(vector) -> Return a diagonal matrix from the given cGSLVector."
-    //    );
+        // Basic methods
+        .def("Delete", &cGSLMatrix::Delete)
+        .def("GetNRow", &cGSLMatrix::GetNRow)
+        .def("GetNCol", &cGSLMatrix::GetNCol)
 
-        // SVD => (U,S,V)
-    bp::def("Svd",
-        &Svd_wrapper,
-        "Svd(M) -> (U, S, V)  (Singular Value Decomposition).");
+        // Overload ReAlloc
+        .def("ReAlloc", ReAlloc_rc_val,
+            (boost::python::arg("theNRow"), boost::python::arg("theNCol"), boost::python::arg("theVal") = 0.0))
+        .def("ReAlloc", ReAlloc_cGSLVector)
+        .def("ReAlloc", ReAlloc_cGSLMatrix)
 
-    // Inv => no error
-    bp::def("Inv",
-        &Inv_noerr_wrapper,
-        "Inv(M) -> Return the inverse of matrix M (throws if singular).");
+        // Access methods
+        .def("get", &GSLMatrix_get_item)
+        .def("set", &GSLMatrix_set_item)
 
-    // Inv => with error code
-    bp::def("InvWithError",
-        &Inv_err_wrapper,
-        "InvWithError(M) -> (InverseMatrix, errorCode). errorCode != 0 if fail.");
+        // Python-style indexing
+        .def("__getitem__", &GSLMatrix_getitem)
 
-    // NOTE: we comment out MatrixForMultNormal(...) for the same reason:
-    //
-    //    bp::def("MatrixForMultNormal",
-    //        &MatrixForMultNormal,
-    //        "MatrixForMultNormal(covMat) -> cGSLMatrix used for sampling from a multivariate normal."
-    //    );
+        // Direct Set method
+        .def("Set", &cGSLMatrix::Set,
+            (boost::python::arg("theValue"), boost::python::arg("theRow"), boost::python::arg("theCol")))
 
-    bp::def("ClearMatrix",
-        &ClearMatrix,
-        "ClearMatrix(M) sets all elements of M to 0.0.");
+        // Assignment operators
+        .def("AssignDouble", &GSLMatrix_assignDouble,
+            return_internal_reference<>(),
+            "Assign a double value to all elements (self = double).")
+        .def("AssignMatrix", &GSLMatrix_assignMatrix,
+            return_internal_reference<>(),
+            "Assign another cGSLMatrix (self = other matrix).")
+        .def("AssignVector", &GSLMatrix_assignVector,
+            return_internal_reference<>(),
+            "Assign from a cGSLVector (creates a column matrix).")
 
-    // Transpose
-    bp::def("Transpose",
-        (cGSLMatrix(*)(const cGSLMatrix&)) & Transpose,
-        "Transpose(M) -> Return a new cGSLMatrix that is the transpose of M.");
+        // In-place operators
+        .def("AddDoubleInPlace", +[](cGSLMatrix& self, double val) {
+        self += val;
+        return &self;
+            }, return_internal_reference<>())
 
-    bp::def("TransposeVector",
-        (cGSLMatrix(*)(const cGSLVector&)) & Transpose,
-        "TransposeVector(v) -> Return a 1xN cGSLMatrix from cGSLVector v.");
+        .def("AddMatrixInPlace", +[](cGSLMatrix& self, const cGSLMatrix& rhs) {
+        self += rhs;
+        return &self;
+            }, return_internal_reference<>())
 
-    // Abs returns cGSLMatrix
-    bp::def("Abs",
-        (cGSLMatrix(*)(const cGSLMatrix&)) & VectorAndMatrixNameSpace::Abs,
-        "Abs(M) -> Return elementwise absolute value of M.");
+        .def("SubtractDoubleInPlace", +[](cGSLMatrix& self, double val) {
+        self -= val;
+        return &self;
+            }, return_internal_reference<>())
 
-    // Mini returns double
-    bp::def("Mini",
-        (double(*)(const cGSLMatrix&)) & VectorAndMatrixNameSpace::Mini,
-        "Mini(M) -> Return the minimum element in M.");
+        .def("SubtractMatrixInPlace", +[](cGSLMatrix& self, const cGSLMatrix& rhs) {
+        self -= rhs;
+        return &self;
+            }, return_internal_reference<>())
 
-    // Maxi returns double
-    bp::def("Maxi",
-        (double(*)(const cGSLMatrix&)) & VectorAndMatrixNameSpace::Maxi,
-        "Maxi(M) -> Return the maximum element in M.");
+        .def("MultiplyDoubleInPlace", +[](cGSLMatrix& self, double val) {
+        self *= val;
+        return &self;
+            }, return_internal_reference<>())
 
-    // IsNaN returns bool
-    bp::def("IsNaN",
-        (bool(*)(const cGSLMatrix&)) & VectorAndMatrixNameSpace::IsNaN,
-        "IsNaN(M) -> True if any element of M is NaN, else False.");
+        .def("MultiplyMatrixInPlace", +[](cGSLMatrix& self, const cGSLMatrix& rhs) {
+        self *= rhs;
+        return &self;
+            }, return_internal_reference<>())
 
-    // matrix*vector, vector*matrix
-    bp::def("mat_mul_vec",
-        &mat_mul_vec,
-        "mat_mul_vec(M, v) -> M*v (a cGSLVector).");
-    bp::def("vec_mul_mat",
-        &vec_mul_mat,
-        "vec_mul_mat(v, M) -> v*M (a cGSLMatrix).");
+        .def("DivideInPlace", +[](cGSLMatrix& self, double val) {
+        self /= val;
+        return &self;
+            }, return_internal_reference<>())
+
+        // Row/column manipulation
+        .def("SetRow", &cGSLMatrix::SetRow)
+        .def("SetColumn", &cGSLMatrix::SetColumn)
+
+        // String representation
+        .def("__str__", &GSLMatrix_str)
+        .def("__repr__", &GSLMatrix_str)
+        ;
+
+    // Export matrix operations with explicit casts to resolve ambiguities
+    def("Transpose", static_cast<cGSLMatrix(*)(const cGSLMatrix&)>(Transpose),
+        "Transpose a matrix");
+    def("TransposeVector", static_cast<cGSLMatrix(*)(const cGSLVector&)>(Transpose),
+        "Create a row matrix as transpose of a vector");
+    def("Inv", static_cast<cGSLMatrix(*)(const cGSLMatrix&)>(Inv),
+        "Invert a matrix");
+    def("Identity", Identity,
+        "Create identity matrix of specified size");
+    def("Zeros", Zeros,
+        "Create zero matrix of specified dimensions");
+
+    // Removed Diag function that's causing linking issues
+
+    def("Abs", static_cast<cGSLMatrix(*)(const cGSLMatrix&)>(Abs),
+        "Take absolute value of each element in matrix");
+    def("Maxi", static_cast<double(*)(const cGSLMatrix&)>(Maxi),
+        "Find maximum value in matrix");
+    def("Mini", static_cast<double(*)(const cGSLMatrix&)>(Mini),
+        "Find minimum value in matrix");
+    def("IsNaN", static_cast<bool(*)(const cGSLMatrix&)>(IsNaN),
+        "Check if matrix contains NaN values");
+    def("ClearMatrix", ClearMatrix,
+        "Clear a matrix (set all elements to zero)");
+
 }
