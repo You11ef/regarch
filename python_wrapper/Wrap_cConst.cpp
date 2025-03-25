@@ -3,15 +3,216 @@
 #include <boost/python/wrapper.hpp>
 #include <boost/python/extract.hpp>
 
+// Include your helper that converts Python lists/tuples to cDVector
+#include "PythonConversion.h"
 
 using namespace boost::python;
 using namespace RegArchLib;
 
+// Helper for printing
 static void cConstPrint(cConst& self)
 {
 #ifndef _RDLL_
     self.Print(std::cout);
 #endif
+}
+
+// --------------------------------------------------------------------
+// NEW: Helper for a unified "set" that accepts float or Python lists
+// --------------------------------------------------------------------
+static void cConstSet(cConst& self,
+    const object& value_or_vector,
+    const object& index_or_name,
+    const object& num_param = object())
+{
+    // Attempt direct extraction as cDVector or double
+    extract<cDVector> vec_extract(value_or_vector);
+    extract<double>   val_extract(value_or_vector);
+
+    // Check second argument
+    extract<std::string> name_extract(index_or_name);
+    extract<uint>        idx_extract(index_or_name);
+
+    if (vec_extract.check())
+    {
+        // The user gave us a cDVector or a list that auto-converted
+        cDVector vect = vec_extract();
+
+        if (name_extract.check())
+        {
+            // self.Set(const cDVector&, std::string)
+            self.Set(vect, name_extract());
+        }
+        else if (idx_extract.check())
+        {
+            // self.Set(const cDVector&, uint)
+            uint param_num = 0;
+            if (!num_param.is_none())
+                param_num = extract<uint>(num_param);
+            self.Set(vect, param_num);
+        }
+        else
+        {
+            throw std::runtime_error(
+                "cConst.set(...) usage: second arg must be string or uint when passing a vector.");
+        }
+    }
+    else if (val_extract.check())
+    {
+        // The user gave us a single float/double
+        double val = val_extract();
+
+        if (name_extract.check())
+        {
+            // self.Set(double, std::string, uint)
+            std::string param_name = name_extract();
+            uint idx = 0;
+            if (!num_param.is_none())
+                idx = extract<uint>(num_param);
+            self.Set(val, param_name, idx);
+        }
+        else if (idx_extract.check())
+        {
+            // self.Set(double, uint, uint)
+            uint i = idx_extract();
+            uint param_num = 0;
+            if (!num_param.is_none())
+                param_num = extract<uint>(num_param);
+            self.Set(val, i, param_num);
+        }
+        else
+        {
+            throw std::runtime_error(
+                "cConst.set(...) usage: second arg must be string or uint when passing a float.");
+        }
+    }
+    else
+    {
+        // Fallback if it's a Python list/tuple not auto-converted
+        if (PyList_Check(value_or_vector.ptr()) || PyTuple_Check(value_or_vector.ptr()))
+        {
+            cDVector vect = py_list_or_tuple_to_cDVector(value_or_vector);
+
+            if (name_extract.check())
+            {
+                self.Set(vect, name_extract());
+            }
+            else if (idx_extract.check())
+            {
+                uint param_num = 0;
+                if (!num_param.is_none())
+                    param_num = extract<uint>(num_param);
+                self.Set(vect, param_num);
+            }
+            else
+            {
+                throw std::runtime_error(
+                    "cConst.set(...) usage: second arg must be string or uint when passing a Python list/tuple.");
+            }
+        }
+        else
+        {
+            throw std::runtime_error(
+                "First argument must be float, cDVector, or Python list/tuple for cConst.set(...).");
+        }
+    }
+}
+
+// --------------------------------------------------------------------
+// NEW: Helper for a unified "get" that returns float or cDVector
+// --------------------------------------------------------------------
+static object cConstGet(cConst& self,
+    const object& index_or_name,
+    const object& num_param = object())
+{
+    extract<std::string> name_extract(index_or_name);
+    extract<uint>        idx_extract(index_or_name);
+
+    if (name_extract.check())
+    {
+        // The user passed a param name
+        std::string pname = name_extract();
+
+        // If user gave no second argument => cDVector& version
+        if (num_param.is_none())
+        {
+            // Potentially ambiguous if you have both:
+            //  - cDVector& Get(std::string)
+            //  - double Get(std::string, uint=0)
+            // If ambiguous, see pointer-to-member approach below
+            return object(boost::ref(self.Get(pname)));
+        }
+        else
+        {
+            // user gave an index => double version
+            uint idx = extract<uint>(num_param);
+            return object(self.Get(pname, idx));
+        }
+    }
+    else if (idx_extract.check())
+    {
+        // The user passed a param index
+        uint i = idx_extract();
+
+        if (num_param.is_none())
+        {
+            // cDVector& version => Get(uint)
+            return object(boost::ref(self.Get(i)));
+        }
+        else
+        {
+            // double version => Get(uint, uint)
+            uint sub_idx = extract<uint>(num_param);
+            return object(self.Get(i, sub_idx));
+        }
+    }
+    else
+    {
+        throw std::runtime_error(
+            "cConst.get(...) usage: first argument must be a string or a uint.");
+    }
+}
+
+// --------------------------------------------------------------------
+// NEW: Helper for a unified "realloc" that can accept size or python list
+// --------------------------------------------------------------------
+static void cConstReAlloc(cConst& self,
+    const object& size_or_vector,
+    const object& num_param = object())
+{
+    extract<cDVector> vec_extract(size_or_vector);
+    extract<uint>     size_extract(size_or_vector);
+
+    uint param = 0;
+    if (!num_param.is_none())
+        param = extract<uint>(num_param);
+
+    if (vec_extract.check())
+    {
+        // ReAlloc(cDVector, uint)
+        cDVector vect = vec_extract();
+        self.ReAlloc(vect, param);
+    }
+    else if (size_extract.check())
+    {
+        // ReAlloc(uint, uint)
+        uint sz = size_extract();
+        self.ReAlloc(sz, param);
+    }
+    else
+    {
+        // Fallback for Python list/tuple
+        if (PyList_Check(size_or_vector.ptr()) || PyTuple_Check(size_or_vector.ptr()))
+        {
+            cDVector vect = py_list_or_tuple_to_cDVector(size_or_vector);
+            self.ReAlloc(vect, param);
+        }
+        else
+        {
+            throw std::runtime_error(
+                "cConst.realloc(...) usage: pass a uint size, cDVector, or list/tuple of floats.");
+        }
+    }
 }
 
 void export_cConst()
@@ -163,5 +364,32 @@ void export_cConst()
         // Assignment operator
         .def("__assign__", &cConst::operator=, return_internal_reference<>(),
             "Assignment operator - copies another constant mean model.")
+
+        // ----------------------------------------------------------------
+        // NEW: Unified "set", "get", "realloc" that handle python lists
+        // ----------------------------------------------------------------
+        .def("set", &cConstSet,
+            (boost::python::arg("value_or_vector"), boost::python::arg("index_or_name"), boost::python::arg("num_param") = object()),
+            "Unified method to set parameters (float or list) by name or index.\n\n"
+            "Examples:\n"
+            "  cvar.set(2.0, 0)             # single float param by index\n"
+            "  cvar.set([2.0], 0)           # from python list\n"
+            "  cvar.set(5.0, 'const', 0)    # by name"
+        )
+        .def("get", &cConstGet,
+            (boost::python::arg("index_or_name"), boost::python::arg("num_param") = object()),
+            "Unified method to get parameters as float or cDVector.\n\n"
+            "Examples:\n"
+            "  val = cvar.get(0)            # cDVector if multiple params\n"
+            "  val2 = cvar.get(0, 1)        # single float\n"
+            "  val3 = cvar.get('const')     # cDVector or float if only one param\n"
+        )
+        .def("realloc", &cConstReAlloc,
+            (boost::python::arg("size_or_vector"), boost::python::arg("num_param") = object()),
+            "Unified method to reallocate parameters (size or python list).\n\n"
+            "Examples:\n"
+            "  cvar.realloc(1)             # reallocate size=1\n"
+            "  cvar.realloc([5.0])         # from python list\n"
+        )
         ;
 }

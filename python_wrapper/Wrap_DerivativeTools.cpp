@@ -1,4 +1,7 @@
-﻿#include "StdAfxRegArchLib.h"
+﻿// not used
+
+
+#include "StdAfxRegArchLib.h"
 #include <boost/python.hpp>
 #include <boost/python/wrapper.hpp>
 #include <boost/python/extract.hpp>
