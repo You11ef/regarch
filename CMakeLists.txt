@@ -76,15 +76,15 @@ set_target_properties(regarch_wrapper PROPERTIES SUFFIX ".pyd")
 target_link_libraries(TestRegArch PRIVATE
   RegArchLib VectorAndMatrix Error gsl cblas nlopt
   WrapperGslCpp WrapperNloptCpp
-  libboost_python311-vc143-mt-sgd-x64-1_87
-  $ENV{PYTHON_HOME}/libs/python311.lib
+  libboost_python312-vc143-mt-sgd-x64-1_87
+  $ENV{PYTHON_HOME}/libs/python312.lib
 )
 
 target_link_libraries(regarch_wrapper PRIVATE
   RegArchLib VectorAndMatrix Error gsl cblas nlopt
   WrapperGslCpp WrapperNloptCpp
-  libboost_python311-vc143-mt-sgd-x64-1_87
-  $ENV{PYTHON_HOME}/libs/python311.lib
+  libboost_python312-vc143-mt-sgd-x64-1_87
+  $ENV{PYTHON_HOME}/libs/python312.lib
 )
 
 target_compile_definitions(regarch_wrapper PRIVATE
