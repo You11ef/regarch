@@ -3,10 +3,182 @@
 #include <boost/python/wrapper.hpp>
 #include <boost/python/extract.hpp>
 
+// 1) Include your helper header that provides py_list_or_tuple_to_cDVector(...)
+#include "PythonConversion.h"
 
 using namespace boost::python;
 using namespace RegArchLib;
 
+// ---------------------------------------------------------------------
+// NEW HELPER: cArfimaSet for unified Python-style parameter setting
+// ---------------------------------------------------------------------
+static void cArfimaSet(cArfima& self, const object& arg1, const object& arg2, const object& arg3 = object())
+{
+    // Attempt direct extraction as cDVector or double
+    extract<cDVector> vec_extract(arg1);
+    extract<double>   val_extract(arg1);
+
+    // Check second argument for string (param name) or uint (param index)
+    extract<std::string> name_extract(arg2);
+    extract<uint>        index_extract(arg2);
+
+    if (vec_extract.check())
+    {
+        // The user passed a cDVector
+        cDVector vector = vec_extract();
+
+        if (name_extract.check()) {
+            // e.g. set(vector, "ar") or set(vector, "ma"), etc.
+            self.Set(vector, name_extract());
+        }
+        else if (index_extract.check()) {
+            // e.g. set(vector, 0)
+            uint param_num = 0;
+            if (!arg3.is_none())
+                param_num = extract<uint>(arg3);
+            self.Set(vector, param_num);
+        }
+        else {
+            throw std::runtime_error("Second argument must be string (param name) or uint (index) when first arg is a cDVector.");
+        }
+    }
+    else if (val_extract.check())
+    {
+        // The user passed a single scalar (double)
+        double value = val_extract();
+
+        if (name_extract.check()) {
+            // e.g. set(0.5, "ar", 0)
+            uint idx = 0;
+            if (!arg3.is_none())
+                idx = extract<uint>(arg3);
+            self.Set(value, name_extract(), idx);
+        }
+        else if (index_extract.check()) {
+            // e.g. set(0.5, 0, 2)
+            uint idx = index_extract();
+            uint param_num = 0;
+            if (!arg3.is_none())
+                param_num = extract<uint>(arg3);
+            self.Set(value, idx, param_num);
+        }
+        else {
+            throw std::runtime_error("Second argument must be string (param name) or uint (index) when first arg is a double.");
+        }
+    }
+    else
+    {
+        // Fallback if the user passed a Python list or tuple
+        if (PyList_Check(arg1.ptr()) || PyTuple_Check(arg1.ptr()))
+        {
+            cDVector vector = py_list_or_tuple_to_cDVector(arg1);
+
+            if (name_extract.check()) {
+                // e.g. set([0.1, 0.2], "ar")
+                self.Set(vector, name_extract());
+            }
+            else if (index_extract.check()) {
+                // e.g. set([0.1, 0.2], 0)
+                uint param_num = 0;
+                if (!arg3.is_none())
+                    param_num = extract<uint>(arg3);
+                self.Set(vector, param_num);
+            }
+            else {
+                throw std::runtime_error("Second argument must be string or uint when passing a Python list/tuple.");
+            }
+        }
+        else {
+            throw std::runtime_error("First argument must be float, cDVector, or a Python list/tuple of floats.");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// NEW HELPER: cArfimaGet for unified Python-style parameter getting
+// ---------------------------------------------------------------------
+static object cArfimaGet(cArfima& self, const object& arg1, const object& arg2 = object())
+{
+    // Check if first argument is a string or an index
+    extract<std::string> name_extract(arg1);
+    extract<uint>        idx_extract(arg1);
+
+    if (name_extract.check())
+    {
+        // e.g. get("ar") or get("ar", 0)
+        std::string param_name = name_extract();
+
+        if (arg2.is_none()) {
+            // Return the entire vector => cDVector
+            return object(boost::ref(self.Get(param_name)));
+        }
+        else {
+            // Return a single double
+            uint sub_idx = extract<uint>(arg2);
+            return object(self.Get(param_name, sub_idx));
+        }
+    }
+    else if (idx_extract.check())
+    {
+        // e.g. get(0) or get(0, 1)
+        uint param_num = idx_extract();
+        if (arg2.is_none()) {
+            // Return a cDVector
+            return object(boost::ref(self.Get(param_num)));
+        }
+        else {
+            // Return a double
+            uint sub_idx = extract<uint>(arg2);
+            return object(self.Get(sub_idx, param_num));
+        }
+    }
+    else {
+        throw std::runtime_error("First argument must be a string (param name) or uint (param index).");
+    }
+}
+
+// ---------------------------------------------------------------------
+// NEW HELPER: cArfimaReAlloc for unified Python-style reallocation
+// ---------------------------------------------------------------------
+static void cArfimaReAlloc(cArfima& self, const object& arg1, const object& arg2 = object())
+{
+    // Try to extract a cDVector or uint from the first argument
+    extract<cDVector> vec_extract(arg1);
+    extract<uint>     uint_extract(arg1);
+
+    uint param_num = 0;
+    if (!arg2.is_none())
+        param_num = extract<uint>(arg2);
+
+    if (vec_extract.check())
+    {
+        // ReAlloc(cDVector, uint)
+        cDVector vect = vec_extract();
+        self.ReAlloc(vect, param_num);
+    }
+    else if (uint_extract.check())
+    {
+        // ReAlloc(uint, uint)
+        uint size = uint_extract();
+        self.ReAlloc(size, param_num);
+    }
+    else
+    {
+        // Fallback for Python list or tuple
+        if (PyList_Check(arg1.ptr()) || PyTuple_Check(arg1.ptr()))
+        {
+            cDVector vect = py_list_or_tuple_to_cDVector(arg1);
+            self.ReAlloc(vect, param_num);
+        }
+        else {
+            throw std::runtime_error("First argument must be a uint, cDVector, or a Python list/tuple of floats.");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// Original code from your snippet, unchanged
+// ---------------------------------------------------------------------
 static void cArfimaPrint(cArfima& self)
 {
 #ifndef _RDLL_
@@ -133,18 +305,13 @@ void export_cArfima()
         .def("get_n_ma", &cArfima::GetNMa,
             "Returns the number of MA parameters (q).")
         .def("compute_grad", &cArfima::ComputeGrad,
-            (boost::python::arg("date"), boost::python::arg("data"),
-                boost::python::arg("grad_data"), boost::python::arg("beg_index")),
+            (boost::python::arg("date"), boost::python::arg("data"), boost::python::arg("grad_data"), boost::python::arg("beg_index")),
             "Computes the gradient of the model at the specified date.")
         .def("compute_hess", &cArfima::ComputeHess,
-            (boost::python::arg("date"), boost::python::arg("data"),
-                boost::python::arg("grad_data"), boost::python::arg("hess_data"),
-                boost::python::arg("beg_index")),
+            (boost::python::arg("date"), boost::python::arg("data"), boost::python::arg("grad_data"), boost::python::arg("hess_data"), boost::python::arg("beg_index")),
             "Computes the Hessian of the model at the specified date.")
         .def("compute_grad_and_hess", &cArfima::ComputeGradAndHess,
-            (boost::python::arg("date"), boost::python::arg("data"),
-                boost::python::arg("grad_data"), boost::python::arg("hess_data"),
-                boost::python::arg("beg_index")),
+            (boost::python::arg("date"), boost::python::arg("data"), boost::python::arg("grad_data"), boost::python::arg("hess_data"), boost::python::arg("beg_index")),
             "Computes both gradient and Hessian in one operation.")
         .def("reg_arch_param_to_vector", &cArfima::RegArchParamToVector,
             (boost::python::arg("dest_vect"), boost::python::arg("index") = 0),
@@ -191,5 +358,35 @@ void export_cArfima()
         // Assignment operator
         .def("__assign__", &cArfima::operator=, return_internal_reference<>(),
             "Assignment operator - copies another ARFIMA model.")
+
+        // ----------------------------------------------------------------
+        // NEW .def calls for the unified "set", "get", and "realloc"
+        // that handle Python lists/tuples automatically
+        // ----------------------------------------------------------------
+        .def("set", &cArfimaSet,
+            (boost::python::arg("arg1"), boost::python::arg("arg2"), boost::python::arg("arg3") = object()),
+            "Unified method to set parameters.\n\n"
+            "Examples:\n"
+            "  set(value, index, param_num)\n"
+            "  set(value, name, index)\n"
+            "  set(list_of_floats, index)  # Python list -> cDVector\n"
+            "  set(cDVector, name)\n")
+        .def("get", &cArfimaGet,
+            (boost::python::arg("arg1"), boost::python::arg("arg2") = object()),
+            "Unified method to get parameters.\n\n"
+            "Examples:\n"
+            "  get(index)\n"
+            "  get(index, sub_idx)\n"
+            "  get(name)\n"
+            "  get(name, sub_idx)\n\n"
+            "Returns cDVector or float, depending on usage.")
+        .def("realloc", &cArfimaReAlloc,
+            (boost::python::arg("arg1"), boost::python::arg("arg2") = object()),
+            "Unified reallocation method.\n\n"
+            "Examples:\n"
+            "  realloc(5)            # ReAlloc(uint)\n"
+            "  realloc([0.1, 0.2])   # ReAlloc(cDVector) from Python list\n"
+            "  realloc(cDVector, paramNum)\n"
+        )
         ;
 }

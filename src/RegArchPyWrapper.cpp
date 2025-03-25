@@ -2,25 +2,14 @@
 using namespace boost::python;
 
 
-void export_cDVector_converters();
 
-
-void export_DerivativeTools();
 void export_RegArchDef();
-void export_cGSLVector();
-void export_cGSLMatrix();
-void export_cError();
 
 void export_cRegArchValue();
 
 void export_cAbstCondMean();
 void export_cAbstCondVar();
 void export_cAbstResiduals();
-
-void export_cRegArchHessien();
-void export_cRegArchGradient();
-
-void export_cNumericDerivative();
 
 void export_cAparch();
 void export_cAr();
@@ -48,35 +37,37 @@ void export_cTsgarch();
 void export_cUgarch();
 void export_cVarInMean();
 
-void export_SomeDistribution();
 void export_cRegArchModel();
 void export_RegArchCompute();
 
-void export_cPolynom();
+
+void export_cGSLVector();
+void export_cGSLMatrix();
+
 
 
 BOOST_PYTHON_MODULE(regarch_wrapper)
 {
 
-    export_cDVector_converters();
+    // export_cDVector_converters();
+    // export_DerivativeTools();
+    // export_cError();
+    // export_cRegArchHessien();
+    // export_cRegArchGradient();
+    // export_cNumericDerivative();
+    // export_cPolynom();
+    // export_SomeDistribution();
 
-    export_DerivativeTools();
     export_RegArchDef();
+
     export_cGSLVector();
     export_cGSLMatrix();
-    export_cError();
 
     export_cRegArchValue();
 
     export_cAbstCondMean();
     export_cAbstCondVar();
     export_cAbstResiduals();
-
-    export_cRegArchHessien();
-    export_cRegArchGradient();
-
-    export_cNumericDerivative();
-
 
     export_cAparch();
     export_cAr();
@@ -104,8 +95,7 @@ BOOST_PYTHON_MODULE(regarch_wrapper)
     export_cUgarch();
     export_cVarInMean();
 
-    export_SomeDistribution();
     export_cRegArchModel();
     export_RegArchCompute();
-    export_cPolynom();
+
 }

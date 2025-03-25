@@ -7,7 +7,6 @@ using namespace boost::python;
 using namespace RegArchLib;
 using namespace VectorAndMatrixNameSpace;
 
-// -----------------------------------------------------
 // 1. Overload disambiguation typedefs for simulation and LLH functions
 typedef double (*LLHFunc1)(const cRegArchModel&, cDVector*, cDMatrix*);
 typedef double (*LLHFunc2)(const cRegArchModel&, cRegArchValue&);
@@ -17,7 +16,6 @@ typedef void (*SimulFuncFull)(const unsigned int, const cRegArchModel&, cDVector
 // IMPORTANT: Add typedef for the overload of RegArchSimul that takes a cRegArchValue&
 typedef void (*SimulFunc2)(const unsigned int, const cRegArchModel&, cRegArchValue&);
 
-// -----------------------------------------------------
 // 2. Wrapper function for RegArchSimul that accepts default parameters
 //    We use boost::python::object for the optional parameters.
 void RegArchSimul_default(unsigned int theNSample,
@@ -45,7 +43,6 @@ void RegArchSimul_default(unsigned int theNSample,
     RegArchSimul(theNSample, theModel, theYt, xt, xvt);
 }
 
-// -----------------------------------------------------
 // 3. For all other functions, we use explicit typedefs as needed.
 typedef void (*FillValueFunc)(uint, const cRegArchModel&, cRegArchValue&);
 typedef void (*FillValueForNumericGradFunc)(uint, const cRegArchModel&, cRegArchValue&, cNumericDerivative&);
@@ -71,7 +68,6 @@ typedef void (*NumericRegArchHessLLHoldFunc)(cRegArchModel&, cRegArchValue&, cDM
 typedef void (*RegArchComputeIAndJFunc)(cRegArchModel&, cRegArchValue&, cDMatrix&, cDMatrix&);
 typedef void (*RegArchStatTableFunc)(cRegArchModel&, cRegArchValue&, cDMatrix&);
 
-// -----------------------------------------------------
 // 4. Export function
 void export_RegArchCompute()
 {

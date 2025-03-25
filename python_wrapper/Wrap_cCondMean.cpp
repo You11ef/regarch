@@ -3,11 +3,13 @@
 #include <boost/python/wrapper.hpp>
 #include <boost/python/extract.hpp>
 
+// We NO LONGER include "PythonListConversion.h" 
+// because we decided not to provide a .set(...) method for cCondMean.
 
 using namespace boost::python;
 using namespace RegArchLib;
 
-// A helper function to print the object.
+// A helper function to print the object to std::cout
 static void cCondMeanPrint(cCondMean& self)
 {
 #ifndef _RDLL_
@@ -39,90 +41,204 @@ static boost::python::list GetCondMeanTypeList(const cCondMean& self) {
     return result;
 }
 
+// Helper to get parameter names as a list
+static boost::python::list GetParamNamesList(cCondMean& self) {
+    boost::python::list result;
+    uint nParam = self.GetNParam();
+    if (nParam > 0) {
+        std::string* names = new std::string[nParam];
+        self.GetParamName(names);
+        for (uint i = 0; i < nParam; i++) {
+            if (!names[i].empty()) {
+                result.append(names[i]);
+            }
+        }
+        delete[] names;
+    }
+    return result;
+}
+
 void export_cCondMean()
 {
     class_<cCondMean>("cCondMean",
-        "Container for multiple conditional mean components.",
-        init<>())
+        "Container for multiple conditional mean components.\n\n"
+        "The conditional mean model in RegArch is a sum of 'elementary' conditional mean components\n"
+        "This class provides methods to manage these components, compute the overall conditional mean,\n"
+        "and handle parameters collectively.",
+        init<>()
+    )
         // Copy constructor
-        .def(init<const cCondMean&>())
+        .def(init<const cCondMean&>(
+            boost::python::arg("other"),
+            "Create a copy of an existing conditional mean model.\n\n"
+            "Parameters:\n"
+            "    other (cCondMean): The conditional mean model to copy."
+        ))
 
         // Pythonic naming
         .def("add_one_mean", &cCondMean::AddOneMean,
             boost::python::arg("abstract_cond_mean"),
-            "Adds a new conditional mean component.")
+            "Add a new conditional mean component.\n\n"
+            "Parameters:\n"
+            "    abstract_cond_mean (cAbstCondMean): The conditional mean component to add.\n\n"
+            "Note: The component will be added at the first available position in the internal array."
+        )
         .def("delete_one_mean_enum",
             static_cast<void (cCondMean::*)(eCondMeanEnum)>(&cCondMean::DeleteOneMean),
             boost::python::arg("cond_mean_enum"),
-            "Deletes a conditional mean component by type.")
+            "Delete a conditional mean component by type.\n\n"
+            "Parameters:\n"
+            "    cond_mean_enum (eCondMeanEnum): The type of the component to delete."
+        )
         .def("delete_one_mean_name",
             static_cast<void (cCondMean::*)(std::string)>(&cCondMean::DeleteOneMean),
             boost::python::arg("param_name"),
-            "Deletes a conditional mean component by name.")
+            "Delete a conditional mean component by name.\n\n"
+            "Parameters:\n"
+            "    param_name (str): The name of the component to delete."
+        )
         .def("get_n_mean", &cCondMean::GetNMean,
-            "Returns the number of conditional mean components.")
+            "Get the number of conditional mean components.\n\n"
+            "Returns:\n"
+            "    int: The number of components."
+        )
         .def("get_one_mean_index", &getOneMeanIndex,
             return_value_policy<reference_existing_object>(),
             boost::python::arg("index"),
-            "Gets a conditional mean component by index.")
+            "Get a conditional mean component by index.\n\n"
+            "Parameters:\n"
+            "    index (int): The index of the component.\n\n"
+            "Returns:\n"
+            "    cAbstCondMean or None: The component at the specified index, or None if not found."
+        )
         .def("get_one_mean_name",
             static_cast<cAbstCondMean * (cCondMean::*)(std::string) const>(&cCondMean::GetOneMean),
             return_value_policy<reference_existing_object>(),
             boost::python::arg("param_name"),
-            "Gets a conditional mean component by name.")
+            "Get a conditional mean component by name.\n\n"
+            "Parameters:\n"
+            "    param_name (str): The name of the component.\n\n"
+            "Returns:\n"
+            "    cAbstCondMean or None: The component with the specified name, or None if not found."
+        )
         .def("get_cond_mean_type", &GetCondMeanTypeList,
-            "Returns a list of types for all conditional mean components.")
+            "Get a list of types for all conditional mean components.\n\n"
+            "Returns:\n"
+            "    list: A list of eCondMeanEnum values representing the types of all components."
+        )
         .def("set_default_init_point",
             static_cast<void (cCondMean::*)(double, double)>(&cCondMean::SetDefaultInitPoint),
             (boost::python::arg("mean"), boost::python::arg("var")),
-            "Sets default initial parameter values based on mean and variance.")
+            "Set default initial parameter values for all components based on mean and variance.\n\n"
+            "Parameters:\n"
+            "    mean (double): The mean value.\n"
+            "    var (double): The variance value."
+        )
         .def("set_default_init_point_value",
             static_cast<void (cCondMean::*)(cRegArchValue&)>(&cCondMean::SetDefaultInitPoint),
             boost::python::arg("value"),
-            "Sets default initial parameter values based on RegArch values.")
+            "Set default initial parameter values for all components based on RegArch values.\n\n"
+            "Parameters:\n"
+            "    value (cRegArchValue): The RegArch values object."
+        )
         .def("update_proxy_mean_parameters", &cCondMean::UpdateProxyMeanParameters,
-            "Updates proxy mean parameters.")
+            "Update proxy mean parameters for all components."
+        )
         .def("compute_mean", &cCondMean::ComputeMean,
             (boost::python::arg("date"), boost::python::arg("data")),
-            "Computes the conditional mean at the specified date.")
+            "Compute the overall conditional mean at the specified date.\n\n"
+            "Parameters:\n"
+            "    date (int): The date index.\n"
+            "    data (cRegArchValue): The data object.\n\n"
+            "Returns:\n"
+            "    double: The computed conditional mean value."
+        )
         .def("get_n_param", &cCondMean::GetNParam,
-            "Returns the total number of parameters.")
+            "Get the total number of parameters across all components.\n\n"
+            "Returns:\n"
+            "    int: The total number of parameters."
+        )
         .def("get", &cCondMean::Get,
-            (boost::python::arg("num_mean") = 0, boost::python::arg("index") = 0,
-                boost::python::arg("num_param") = 0),
-            "Gets a parameter value.")
+            (boost::python::arg("num_mean") = 0, boost::python::arg("index") = 0, boost::python::arg("num_param") = 0),
+            "Get a parameter value.\n\n"
+            "Parameters:\n"
+            "    num_mean (int, optional): The index of the mean component. Default is 0.\n"
+            "    index (int, optional): The parameter index. Default is 0.\n"
+            "    num_param (int, optional): The parameter number. Default is 0.\n\n"
+            "Returns:\n"
+            "    double: The parameter value."
+        )
         .def("get_n_lags", &cCondMean::GetNLags,
-            "Returns the number of lags required for computation.")
+            "Get the number of lags required for computation.\n\n"
+            "Returns:\n"
+            "    int: The number of lags."
+        )
         .def("compute_grad", &cCondMean::ComputeGrad,
-            (boost::python::arg("date"), boost::python::arg("data"),
-                boost::python::arg("grad_data")),
-            "Computes the gradient at the specified date.")
+            (boost::python::arg("date"), boost::python::arg("data"), boost::python::arg("grad_data")),
+            "Compute the gradient of the model at the specified date.\n\n"
+            "Parameters:\n"
+            "    date (int): The date index.\n"
+            "    data (cRegArchValue): The data object.\n"
+            "    grad_data (cRegArchGradient): The gradient object to store results."
+        )
         .def("reg_arch_param_to_vector", &cCondMean::RegArchParamToVector,
             (boost::python::arg("dest_vect"), boost::python::arg("index")),
-            "Converts model parameters to a vector representation.")
+            "Convert all components' parameters to a vector representation.\n\n"
+            "Parameters:\n"
+            "    dest_vect (cDVector): The destination vector.\n"
+            "    index (int): The starting index."
+        )
         .def("vector_to_reg_arch_param", &cCondMean::VectorToRegArchParam,
             (boost::python::arg("src_vect"), boost::python::arg("index") = 0),
-            "Converts a vector representation back to model parameters.")
+            "Convert a vector representation back to all components' parameters.\n\n"
+            "Parameters:\n"
+            "    src_vect (cDVector): The source vector.\n"
+            "    index (int, optional): The starting index. Default is 0."
+        )
         .def("compute_hess", &cCondMean::ComputeHess,
-            (boost::python::arg("date"), boost::python::arg("data"),
-                boost::python::arg("grad_data"), boost::python::arg("hess_data")),
-            "Computes the Hessian at the specified date.")
+            (boost::python::arg("date"), boost::python::arg("data"), boost::python::arg("grad_data"), boost::python::arg("hess_data")),
+            "Compute the Hessian of the model at the specified date.\n\n"
+            "Parameters:\n"
+            "    date (int): The date index.\n"
+            "    data (cRegArchValue): The data object.\n"
+            "    grad_data (cRegArchGradient): The gradient object.\n"
+            "    hess_data (cRegArchHessien): The Hessian object to store results."
+        )
         .def("compute_grad_and_hess", &cCondMean::ComputeGradAndHess,
-            (boost::python::arg("date"), boost::python::arg("data"),
-                boost::python::arg("grad_data"), boost::python::arg("hess_data")),
-            "Computes both gradient and Hessian at the specified date.")
+            (boost::python::arg("date"), boost::python::arg("data"), boost::python::arg("grad_data"), boost::python::arg("hess_data")),
+            "Compute both gradient and Hessian in one operation.\n\n"
+            "Parameters:\n"
+            "    date (int): The date index.\n"
+            "    data (cRegArchValue): The data object.\n"
+            "    grad_data (cRegArchGradient): The gradient object to store results.\n"
+            "    hess_data (cRegArchHessien): The Hessian object to store results."
+        )
         .def("get_param_name_char",
             static_cast<void (cCondMean::*)(char**)>(&cCondMean::GetParamName),
             boost::python::arg("name"),
-            "Gets parameter names as C-style strings.")
+            "Get parameter names as C-style strings.\n\n"
+            "Parameters:\n"
+            "    name (char**): Array to store parameter names.\n\n"
+            "Note: This method is primarily for internal use. Use get_param_name_string instead."
+        )
         .def("get_param_name_string",
             static_cast<void (cCondMean::*)(std::string[])>(&cCondMean::GetParamName),
             boost::python::arg("name"),
-            "Gets parameter names as C++ strings.")
+            "Get parameter names as C++ strings.\n\n"
+            "Parameters:\n"
+            "    name (string[]): Array to store parameter names."
+        )
+        .def("get_param_names", &GetParamNamesList,
+            "Get all parameter names as a Python list.\n\n"
+            "Returns:\n"
+            "    list: List of parameter names."
+        )
         .def("print", &cCondMeanPrint,
-            "Prints information about this conditional mean model.")
+            "Print information about this conditional mean model to standard output."
+        )
         .def("delete", &cCondMean::Delete,
-            "Frees memory used by this model.")
+            "Free memory used by this model."
+        )
 
         // Original C++ naming for compatibility
         .def("AddOneMean", &cCondMean::AddOneMean)
@@ -152,6 +268,11 @@ void export_cCondMean()
 
         // Assignment operator
         .def("__assign__", &cCondMean::operator=, return_internal_reference<>(),
-            "Assignment operator - copies another conditional mean model.")
+            "Assignment operator - copies another conditional mean model.\n\n"
+            "Parameters:\n"
+            "    other (cCondMean): The source conditional mean model.\n\n"
+            "Returns:\n"
+            "    cCondMean: Reference to this model after assignment."
+        )
         ;
 }
