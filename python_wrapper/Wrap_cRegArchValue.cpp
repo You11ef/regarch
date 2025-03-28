@@ -93,7 +93,38 @@ static std::string cRegArchValue_repr(cRegArchValue& self)
     return oss.str();
 }
 
-// --- NEW: Factory function to construct cRegArchValue from a cDVector by value ---
+// New helper method to set Xt directly from a Python list of lists
+static void cRegArchValue_SetXtFromPyList(cRegArchValue& self, object pyList)
+{
+    // Convert to cDMatrix
+    cDMatrix matrix = py_list_of_lists_to_cDMatrix(pyList);
+
+    // Apply to Xt by calling ReAllocXt with the matrix object
+    self.ReAllocXt(matrix);
+}
+
+// Corrected helper method to set a single element in Xt
+static void cRegArchValue_SetXtElement(cRegArchValue& self, int row, int col, double value)
+{
+    // Check if the matrix is allocated (has non-zero dimensions)
+    if (self.mXt.GetNRow() == 0 || self.mXt.GetNCol() == 0) {
+        PyErr_SetString(PyExc_RuntimeError, "X matrix not allocated");
+        throw_error_already_set();
+        return;
+    }
+
+    // Check row and column bounds
+    if (row >= 0 && row < static_cast<int>(self.mXt.GetNRow()) &&
+        col >= 0 && col < static_cast<int>(self.mXt.GetNCol())) {
+        self.mXt.Set(value, row, col);
+    }
+    else {
+        PyErr_SetString(PyExc_IndexError, "Matrix indices out of range");
+        throw_error_already_set();
+    }
+}
+
+// --- Factory function to construct cRegArchValue from a cDVector by value ---
 // This function uses your registered conversion for cDVector to allow passing a Python list.
 cRegArchValue* new_cRegArchValue_from_cDVector(const cDVector& yt)
 {
@@ -117,7 +148,7 @@ void export_cRegArchValue()
             (boost::python::arg("theYt") = (cDVector*)NULL, boost::python::arg("theXt") = (cDMatrix*)NULL, boost::python::arg("theXvt") = (cDMatrix*)NULL),
             "cRegArchValue(cDVector* theYt=nullptr, cDMatrix* theXt=nullptr, cDMatrix* theXvt=nullptr)"
         ))
-        // NEW: Add a constructor that accepts a cDVector by value.
+        // Add a constructor that accepts a cDVector by value.
         .def("__init__", make_constructor(new_cRegArchValue_from_cDVector,
             default_call_policies(), (boost::python::arg("theYt"))))
         // Public data members.
@@ -157,5 +188,13 @@ void export_cRegArchValue()
             "Return formatted data as a string")
         .def("__str__", &cRegArchValue_str)
         .def("__repr__", &cRegArchValue_repr)
+
+        // New Pythonic helpers for matrix operations
+        .def("set_xt", &cRegArchValue_SetXtFromPyList,
+            boost::python::arg("x_data"),
+            "Set X matrix data from a Python list of lists.")
+        .def("set_xt_element", &cRegArchValue_SetXtElement,
+            (boost::python::arg("row"), boost::python::arg("col"), boost::python::arg("value")),
+            "Set a single element in the X matrix.")
         ;
 }
