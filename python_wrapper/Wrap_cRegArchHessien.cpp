@@ -1,5 +1,3 @@
-// not used
-
 
 #include "StdAfxRegArchLib.h"
 #include <boost/python.hpp>

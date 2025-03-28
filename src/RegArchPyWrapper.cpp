@@ -44,6 +44,10 @@ void export_RegArchCompute();
 void export_cGSLVector();
 void export_cGSLMatrix();
 
+void export_cRegArchHessien();
+void export_cRegArchGradient();
+
+
 
 
 BOOST_PYTHON_MODULE(regarch_wrapper)
@@ -52,11 +56,13 @@ BOOST_PYTHON_MODULE(regarch_wrapper)
     // export_cDVector_converters();
     // export_DerivativeTools();
     // export_cError();
-    // export_cRegArchHessien();
-    // export_cRegArchGradient();
     // export_cNumericDerivative();
     // export_cPolynom();
     // export_SomeDistribution();
+
+
+    export_cRegArchHessien();
+    export_cRegArchGradient();
 
     export_RegArchDef();
 

@@ -2,6 +2,7 @@
 #include <boost/python.hpp>
 #include <boost/python/wrapper.hpp>
 #include <boost/python/extract.hpp>
+#include "PythonConversion.h"  // Include your conversion helpers
 
 using namespace boost::python;
 using namespace RegArchLib;
@@ -43,6 +44,66 @@ void RegArchSimul_default(unsigned int theNSample,
     RegArchSimul(theNSample, theModel, theYt, xt, xvt);
 }
 
+// NEW FUNCTION: Wrapper for RegArchSimul that accepts a Python list for output
+void RegArchSimul_with_list(unsigned int theNSample,
+    const cRegArchModel& theModel,
+    object pyList,
+    object theXt = object(),
+    object theXvt = object())
+{
+    // Check if pyList is a list and has the right size
+    if (!PyList_Check(pyList.ptr())) {
+        PyErr_SetString(PyExc_TypeError, "Output parameter must be a list");
+        throw_error_already_set();
+        return;
+    }
+
+    Py_ssize_t listSize = PyList_Size(pyList.ptr());
+    if (listSize != theNSample) {
+        // If sizes don't match, we could resize, but better to raise an error
+        PyErr_SetString(PyExc_ValueError,
+            ("Output list has wrong size: " + std::to_string(listSize) +
+                " vs required " + std::to_string(theNSample)).c_str());
+        throw_error_already_set();
+        return;
+    }
+
+    // Create a cDVector for internal use
+    cDVector tempYt(theNSample);
+
+    // Process optional parameters
+    cDMatrix* xt = NULL;
+    cDMatrix* xvt = NULL;
+
+    // If theXt is provided (and not None), extract the pointer.
+    if (!(theXt == object()))
+    {
+        xt = extract<cDMatrix*>(theXt);
+    }
+
+    // Similarly for theXvt.
+    if (!(theXvt == object()))
+    {
+        xvt = extract<cDMatrix*>(theXvt);
+    }
+
+    // Call the original function
+    RegArchSimul(theNSample, theModel, tempYt, xt, xvt);
+
+    // Copy the results back to the Python list
+    for (unsigned int i = 0; i < theNSample; i++) {
+        // Replace any existing items in the list
+        PyObject* item = PyFloat_FromDouble(tempYt[i]);
+        // PyList_SetItem steals the reference to item, so we don't need to decref it
+        int result = PyList_SetItem(pyList.ptr(), i, item);
+        if (result != 0) {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to set list item");
+            throw_error_already_set();
+            return;
+        }
+    }
+}
+
 // 3. For all other functions, we use explicit typedefs as needed.
 typedef void (*FillValueFunc)(uint, const cRegArchModel&, cRegArchValue&);
 typedef void (*FillValueForNumericGradFunc)(uint, const cRegArchModel&, cRegArchValue&, cNumericDerivative&);
@@ -72,10 +133,24 @@ typedef void (*RegArchStatTableFunc)(cRegArchModel&, cRegArchValue&, cDMatrix&);
 void export_RegArchCompute()
 {
     // Export simulation functions:
-    // We export our wrapper with default arguments under the name "RegArchSimul".
-    def("RegArchSimul", RegArchSimul_default,
+    // MODIFIED: Make RegArchSimul_with_list the primary function name
+    def("RegArchSimul", RegArchSimul_with_list,
         (boost::python::arg("theNSample"), boost::python::arg("theModel"), boost::python::arg("theYt"),
-            boost::python::arg("theXt") = object(), boost::python::arg("theXvt") = object()));
+            boost::python::arg("theXt") = object(), boost::python::arg("theXvt") = object()),
+        "Simulates a RegArch process and stores the result in a Python list.\n\n"
+        "Parameters:\n"
+        "  theNSample: Number of samples to generate\n"
+        "  theModel: RegArch model specification\n"
+        "  theYt: Python list to store results (must match theNSample size)\n"
+        "  theXt: Optional exogenous regressors\n"
+        "  theXvt: Optional variance exogenous regressors");
+
+    // Keep the original function but give it a different name for advanced usage
+    def("RegArchSimul_with_cDVector", RegArchSimul_default,
+        (boost::python::arg("theNSample"), boost::python::arg("theModel"), boost::python::arg("theYt"),
+            boost::python::arg("theXt") = object(), boost::python::arg("theXvt") = object()),
+        "Advanced version that accepts cDVector directly");
+
     // Also export the overload that takes a cRegArchValue for simulation:
     def("RegArchSimul_from_value", static_cast<SimulFunc2>(RegArchSimul));
 
